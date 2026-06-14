@@ -6,15 +6,12 @@ void PhysicsSystem::registerBody(RigidBody* body) {
 
 void PhysicsSystem::update(float dt) {
     for (auto* body : bodies) {
-        if (body->mass <= 0.f) continue; // Ignore static objects
-
-        // Basic Physics Pipeline (A = F / M)
-        body->acceleration = body->totalForce / body->mass;
-        body->velocity += body->acceleration * dt;
-        body->position += body->velocity * dt;
+        if (body->mass <= 0.f) continue; //Ignore static objects
+        //Basic Physics
+        
 
         // Reset forces for the next frame
-        body->totalForce = sf::Vector2f(0.f, 0.f);
+        body->motor.finalTorque=0.0f;
 
         // Sync visual transform
         body->updateVisual();

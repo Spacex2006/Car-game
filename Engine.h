@@ -10,7 +10,7 @@ private:
     
     RigidBody* playerVehicle; // Our test object pointer
 
-    void handleInput();
+    void handleInput(float dt);
     void render();
 
 public:
