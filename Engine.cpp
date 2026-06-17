@@ -9,7 +9,7 @@ Engine::Engine() : window(sf::VideoMode(800, 600), "Multi-File Custom Engine") {
     window.setFramerateLimit(60);
     
     // Create a 1980kg test car at the center of the screen
-    playerVehicle = new RigidBody(sf::Vector2f(400.f, 300.f), sf::Vector2f(20.f, 10.f), 1980.f);
+    playerVehicle = new RigidBody(sf::Vector2f(400.f, 300.f), sf::Vector2f(20.f, 10.f), 1928.f);
     physics.registerBody(playerVehicle);
 
     if (!font.loadFromFile("font.ttf")) {
@@ -42,7 +42,7 @@ void Engine::handleInput(float dt) {
     }
 
     float chargeRate = 0.25f; // [FIX]: Sped this up so the pedal feels responsive 
-    float decayRate = 2.0f;  
+    float decayRate = 1.0f;  
 
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::W)) {
         playerVehicle->motor.pedalState += chargeRate * dt;
@@ -63,8 +63,8 @@ void Engine::handleInput(float dt) {
     playerVehicle->motor.currRPM = std::min(rawRPM, playerVehicle->motor.maxRPM - 10.f);
     
     // Update motor state based on pedal input
-    playerVehicle->motor.motorUpdate(playerVehicle->velocity,playerVehicle->direction);
-    
+    sf::Vector2f v= playerVehicle->motor.motorUpdate(playerVehicle->velocity,playerVehicle->direction);
+    playerVehicle->velocity=v;
     // =================================================================
     // [FIX]: TRACTION CONTROL SYSTEM (TCS)
     // Prevents the massive 4500 Nm axle torque from instantly breaking friction
@@ -77,8 +77,9 @@ void Engine::handleInput(float dt) {
         playerVehicle->motor.finalTorque = maxAllowedMotorTorque * dir;
     }
     
-    // [GENERAL]: Mechanical multiplication through the reduction gear
-    float adjustedTorque = playerVehicle->motor.finalTorque * playerVehicle->motor.gearRatio;
+    // Calculate raw mechanical advantage, then apply the 97% efficiency multiplier
+    float drivetrainEfficiency = 0.97f;
+    float adjustedTorque = playerVehicle->motor.finalTorque * playerVehicle->motor.gearRatio * drivetrainEfficiency;
     
     // [FIX]: Pass the car's direction and mass into the wheel update!
     float f = playerVehicle->rear.wheelUpdate(adjustedTorque, playerVehicle->velocity, playerVehicle->direction, playerVehicle->mass, dt);
@@ -95,8 +96,13 @@ void Engine::handleInput(float dt) {
     // Drag MUST always oppose the direction of travel
     float aeroDrag = (longSpeed > 0.f) ? -aeroForceMag : aeroForceMag;
     
-    // Combine traction force and aero drag
-    sf::Vector2f force = (f + aeroDrag) * playerVehicle->direction;
+    // Add this right before you calculate the final force in your engine loop
+    float rollResistMag = 0.012f * playerVehicle->rear.normalForce*2;
+    float rollDrag = (longSpeed > 0.f) ? -rollResistMag : rollResistMag;
+    if (std::abs(longSpeed) < 0.1f) rollDrag = 0.f; // Don't let rolling resistance push the car backward from a standstill
+
+    // Now add it to the aero drag and motor force
+    sf::Vector2f force = (f + aeroDrag + rollDrag) * playerVehicle->direction;
     
     playerVehicle->bodyUpdate(dt, force);
     playerVehicle->updateVisual();

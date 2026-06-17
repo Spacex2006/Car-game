@@ -49,7 +49,7 @@ public:
     }
 
     void exportToCSV(const std::string& filename) {
-        std::ofstream file(filename);
+        std::ofstream file(filename, std::ios::out | std::ios::trunc);
         if (!file.is_open()) return;
 
         // Write CSV Header row
@@ -62,7 +62,7 @@ public:
                  << f.finalTorque << ","
                  << f.currRPM << ","
                  << f.angularVelocity << ","
-                 << f.carVelocityX << ","
+                 << f.carVelocityX*((18.0f)/(5.0f)) << ","
                  << f.accelerationG<<","
                  << f.gripState << "\n";
         }

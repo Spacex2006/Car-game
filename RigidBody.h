@@ -5,8 +5,8 @@
 constexpr float g = 9.81f;
 
 struct Motor {
-    float maxTorque = 500.0f;
-    float maxRPM = 18000.0f;
+    float maxTorque = 420.0f;
+    float maxRPM = 13750.0f;
     float currRPM = 0.f;
     float currTorque = 0.f;
     float throttle = 0.f;
@@ -14,26 +14,36 @@ struct Motor {
     float finalTorque = 0.f;
     float gearRatio = 9.0f;
 
-    void motorUpdate(sf::Vector2f currvel,sf::Vector2f direc) {
+    sf::Vector2f motorUpdate(sf::Vector2f currvel,sf::Vector2f direc) {
         // Determine if we are moving forward or backward
         float longSpeed = currvel.x*direc.x+currvel.y*direc.y; 
 
-        if (pedalState > 0.05f) {
+        if (pedalState > 0.01f) {
             // Accelerating
-            throttle = pedalState * pedalState*pedalState;
-            if (currRPM > 6000.0f) {
-                currTorque = maxTorque * (1.0f + (6000.0f / maxRPM) - (4.0f / 3.0f) * (currRPM / maxRPM));
+            throttle = pedalState;
+
+            if(currRPM>9000.0f){
+                currTorque = maxTorque * (((9000.0f)*(9000.0f) / (currRPM*currRPM)))*((5.0f)/(9.0f));
+            }
+            else if (currRPM > 5000.0f) {
+                currTorque = maxTorque * (((5000.0f)/ (currRPM)));
             } else {
                 currTorque = maxTorque;
             }
             finalTorque = throttle * currTorque;
         } 
-        else if (pedalState < -0.05f) {
+        else if (pedalState < -0.01f) {
             // Braking or Reversing
             if (longSpeed > 0.5f) { // Moving forward, so we BRAKE
                 // Apply heavy negative torque (combining regen and mechanical brakes)
                 finalTorque = -maxTorque * std::abs(pedalState) * 1.5f; 
-            } else { // Already stopped, so we REVERSE
+            }
+            else if(longSpeed>-0.5f){
+                currvel.x=currvel.x-longSpeed*direc.x;
+                currvel.y=currvel.y-longSpeed*direc.y;
+                finalTorque=0.0f;
+            }
+            else { // Already stopped, so we REVERSE
                 finalTorque = -maxTorque * std::abs(pedalState) * 0.5f; // Reverse is usually limited
             }
         } 
@@ -45,13 +55,14 @@ struct Motor {
                 finalTorque = 0.f;
             }
         }
+        return currvel;
     }
 };
 
 struct Wheel {
-    float radius = 0.355f;
-    float staticFriction = 0.9f;
-    float kineticFriction = 0.7f;
+    float radius = 0.356f;
+    float staticFriction = 1.0f;
+    float kineticFriction = 0.8f;
     float friction = 0.9f;
     float normalForce = 0.f;
     float angularVelocity = 0.f;
@@ -64,29 +75,52 @@ struct Wheel {
     // [FIX]: Passed in carDirection and carMass so the wheel knows what it is pushing
     float wheelUpdate(float torque, sf::Vector2f v, sf::Vector2f carDirection, float carMass, float dt) {
         float force;
-        
-        // [FIX]: Use the Dot Product to find true forward/backward speed instead of absolute magnitude.
         float longVel = (v.x * carDirection.x) + (v.y * carDirection.y);
-        
-        float slipV = (angularVelocity * radius) - longVel;
-        friction = (std::abs(slipV) < 0.2f) ? staticFriction : kineticFriction;
-        
-        float spinDirection = (torque >= 0.f) ? 1.f : -1.f;
 
-        if (std::abs(torque / radius) < normalForce * friction) {
-            // [FIX]: GRIP STATE - Calculate Effective Inertia using the car's full mass
+        // 1. Calculate Slip Ratio
+        float slipRatio = 0.f;
+        if (std::abs(longVel) > 0.1f) {
+            slipRatio = ((angularVelocity * radius) - longVel) / std::abs(longVel);
+        } else {
+            // Prevent divide-by-zero explosions at standstill
+            slipRatio = ((angularVelocity * radius) - longVel) / 0.1f; 
+        }
+
+        // 2. Pacejka Curve (Dynamic Sliding Friction)
+        float peakSlip = 0.1f;     
+        float currentMu = (2.0f * staticFriction * peakSlip * std::abs(slipRatio)) / 
+                        ((peakSlip * peakSlip) + (slipRatio * slipRatio));
+                        
+        if (std::abs(slipRatio) > peakSlip && currentMu < kineticFriction) {
+            currentMu = kineticFriction; // Floor it at kinetic friction during big burnouts
+        }
+
+        // 3. THE FIX: Always check threshold against absolute max STATIC friction.
+        // Use <= so the Traction Control System perfectly balances on the edge without triggering slip.
+        if (std::abs(torque / radius) <= normalForce * staticFriction) {
+            
+            // --- GRIP STATE ---
             float effectiveInertia = inertia + (carMass * radius * radius);
             angularAccelration = torque / effectiveInertia;
             force = torque / radius;
             
-            // [FIX]: Lock the wheel rotation directly to the car's physical speed so it doesn't free-spin
+            // Lock angular velocity to road speed
             angularVelocity = longVel / radius;
+            friction = staticFriction; // Just for telemetry readout
+            
         } else {
-            // [FIX]: SLIP STATE - The wheel breaks free and only fights its own light inertia
-            force = spinDirection * normalForce * friction;
+            
+            // --- SLIP STATE ---
+            float slipDirection = (slipRatio >= 0.f) ? 1.f : -1.f;
+            
+            // Use the Pacejka dynamic friction because we are sliding!
+            force = -slipDirection * normalForce * currentMu; 
+            
             angularAccelration = (torque - (force * radius)) / inertia;
             angularVelocity += angularAccelration * dt;
+            friction = currentMu; // Just for telemetry readout
         }
+        
         return force;
     }
 };
@@ -109,7 +143,7 @@ struct RigidBody {
         orientation = 0.f;
         velocity = sf::Vector2f(0.f, 0.f);
         acceleration = sf::Vector2f(0.f, 0.f);
-        rear.normalForce = (m * g) / 2.f;
+        rear.normalForce = (m * g * 0.6f);
 
         float x = std::cosf(orientation);
         float y = std::sinf(orientation);
