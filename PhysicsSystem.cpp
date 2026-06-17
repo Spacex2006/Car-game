@@ -10,9 +10,6 @@ void PhysicsSystem::update(float dt) {
         //Basic Physics
         
 
-        // Reset forces for the next frame
-        body->motor.finalTorque=0.0f;
-
         // Sync visual transform
         body->updateVisual();
     }
